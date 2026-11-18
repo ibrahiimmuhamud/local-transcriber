@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Transcriber</title>
+<link rel="icon" href="data:,">
+<style>
+@font-face{font-family:"Bricolage Grotesque";src:url('/display.woff2') format('woff2');font-display:swap;font-weight:500 800}
+:root{color-scheme:light;--paper:#f1f4ef;--ink:#182b23;--muted:#52635a;--line:#c9d1c3;--green:#14382c;--mint:#bde7a7;font-family:system-ui,sans-serif;background:var(--paper);color:var(--ink)}
+*{box-sizing:border-box}body{margin:0}main{max-width:1000px;margin:auto;padding:48px 24px 80px}h1,h2,p{margin:0}h1,h2{font-family:"Bricolage Grotesque",sans-serif;letter-spacing:-.025em}h1{font-size:clamp(2.3rem,6vw,4rem);font-weight:650}header{display:flex;justify-content:space-between;gap:24px;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:24px}header p{color:var(--muted);max-width:34ch;font-size:.9rem;line-height:1.6}
+.batch{margin:32px 0;background:var(--green);color:#f2faee;padding:28px;border-radius:12px}.batch h2{font-size:1.7rem}.batch p{color:#d0e3d3;margin-top:12px;line-height:1.5}.batch progress{width:100%;margin-top:24px;height:10px;border:0;appearance:none;border-radius:5px;overflow:hidden;background:#38584a;color:var(--mint)}progress::-webkit-progress-bar{background:#38584a}progress::-webkit-progress-value{background:var(--mint)}progress::-moz-progress-bar{background:var(--mint)}
+#connection{color:#7c341e;line-height:1.5;margin:24px 0}label{display:block;margin:28px 0 8px;font-weight:650}input{width:100%;padding:12px 14px;background:#fcfbf5;border:1px solid var(--line);border-radius:6px;font:inherit;color:var(--ink);caret-color:var(--green)}input::placeholder{color:var(--muted)}article{padding:20px 0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:16px}article h2{font:650 1rem/1.5 system-ui,sans-serif;overflow-wrap:anywhere}article p{font-size:.85rem;color:var(--muted);margin-top:6px;line-height:1.6;overflow-wrap:anywhere}.status{text-align:right;font-size:.85rem;font-variant-numeric:tabular-nums}.status[data-status=failed]{color:#8b3521}article nav{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px}a{color:#205239;text-underline-offset:3px;font-size:.85rem}a:hover{color:#071f12}a:focus-visible,input:focus-visible{outline:2px solid #39735b;outline-offset:4px}::selection{background:#c5e7b8;color:#14382c}#empty{margin-top:24px;color:var(--muted);line-height:1.6}footer{margin-top:36px;color:var(--muted);font-size:.85rem;line-height:1.6;max-width:70ch}[hidden]{display:none!important}
+@media(max-width:600px){main{padding:28px 18px 50px}header{display:block}header p{margin-top:12px}article{grid-template-columns:1fr;gap:8px}.status{text-align:left}.batch{padding:22px}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Local Transcriber</h1><p>Your recordings, processed on your computer.</p></header>
+<section class="batch" aria-labelledby="batch-title"><h2 id="batch-title">Loading your queue…</h2><progress id="overall" aria-label="Recordings completed" value="0" max="1"></progress><p id="activity" role="status" aria-live="polite">Connecting to the local worker.</p></section>
+<p id="connection" role="alert" hidden>Progress is unavailable. Check that Local Transcriber is still running. This page will reconnect automatically.</p>
+<label for="search">Find a recording</label><input id="search" type="search" placeholder="Search by title or date" autocomplete="off">
+<section id="jobs" aria-label="Recording queue"></section><p id="empty" hidden>No recordings match your search.</p>
+<footer>Transcripts are machine generated. Open review notes to find possible low-confidence wording. Audio gaps and translation errors can occur without a warning.</footer>
+</main>
+<script>
+let jobs = [];
+const el = id => document.getElementById(id);
+function node(tag, text, className) {
+  const element = document.createElement(tag);
+  if (text !== undefined) element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+function duration(seconds) {
+  if (!Number.isFinite(seconds)) return 'Duration pending';
+  return Math.floor(seconds / 3600) + ':' + String(Math.floor(seconds / 60) % 60).padStart(2, '0') + ':' + String(Math.floor(seconds) % 60).padStart(2, '0');
+}
+function render() {
+  const completed = jobs.filter(job => job.status === 'done').length;
+  el('batch-title').textContent = completed + ' of ' + jobs.length + ' recordings saved';
+  el('overall').max = Math.max(1, jobs.length);
+  el('overall').value = completed;
+  const current = jobs.find(job => ['downloading', 'loading model', 'transcribing'].includes(job.status));
+  const failures = jobs.filter(job => job.status === 'failed').length;
+  el('activity').textContent = current ? current.status + ' · ' + current.title : failures ? failures + ' recording(s) failed. Re-run the queue to retry.' : completed === jobs.length ? 'Batch complete. Your TXT and SRT files are saved.' : 'Waiting for the worker. Run the queue to continue.';
+  const query = el('search').value.toLowerCase();
+  const filtered = jobs.filter(job => (job.title + ' ' + job.date).toLowerCase().includes(query));
+  el('empty').hidden = filtered.length > 0;
+  const cards = filtered.map(job => {
+    const article = node('article');
+    const copy = node('div');
+    copy.append(node('h2', job.title), node('p', (job.date || 'Undated') + ' · ' + duration(job.duration)));
+    if (job.error) copy.append(node('p', job.error));
+    if (job.status === 'done') {
+      const nav = node('nav');
+      nav.setAttribute('aria-label', 'Files for ' + job.title);
+      for (const [file, label] of [['transcript.txt', 'Transcript TXT'], ['subtitles.srt', 'SRT subtitles'], ['review.json', 'Review notes (' + job.review_count + ')']]) {
+        const link = node('a', label);
+        link.href = '/files/' + job.id + '/' + file;
+        link.download = file;
+        nav.append(link);
+      }
+      copy.append(nav);
+    }
+    const status = node('p', job.status === 'transcribing' ? duration(job.position) + ' / ' + duration(job.duration) : job.status === 'done' ? 'Saved · ' + job.review_count + ' review notes' : job.status, 'status');
+    status.dataset.status = job.status;
+    article.append(copy, status);
+    return article;
+  });
+  el('jobs').replaceChildren(...cards);
+}
+async function refresh() {
+  try {
+    const response = await fetch('/api/jobs', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Connection failed');
+    jobs = await response.json();
+    el('connection').hidden = true;
+    render();
+  } catch (error) { el('connection').hidden = false; }
+  setTimeout(refresh, 2500);
+}
+el('search').addEventListener('input', render);
+refresh();
+</script>
+</body>
+</html>
