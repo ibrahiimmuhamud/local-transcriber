@@ -50,7 +50,8 @@ def run(db, output):
     from faster_whisper.audio import decode_audio
 
     failures = 0
-    models = {}
+    model = None
+    loaded_key = None
     with worker_lock(output):
         for row in db.execute("SELECT id, folder FROM jobs WHERE status = 'done'").fetchall():
             if not all((output / row["folder"] / name).is_file()
@@ -83,10 +84,11 @@ def run(db, output):
                             raise ValueError("The source file changed. Add this file again to create a new job.")
                     update(db, key, status="loading model", error="", position=0)
                     model_key = (config["model"], config["device"], config["compute_type"], config["threads"])
-                    if model_key not in models:
-                        models[model_key] = WhisperModel(config["model"], device=config["device"],
+                    if model_key != loaded_key:
+                        model = None
+                        model = WhisperModel(config["model"], device=config["device"],
                             compute_type=config["compute_type"], cpu_threads=config["threads"])
-                    model = models[model_key]
+                        loaded_key = model_key
                     audio = decode_audio(str(source), sampling_rate=16000)
                     duration = len(audio) / 16000
                     if not duration:

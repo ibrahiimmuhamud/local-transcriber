@@ -6,6 +6,7 @@ import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 MEDIA_EXTENSIONS = {".mp3", ".mp4", ".m4a", ".wav", ".webm", ".flac", ".ogg", ".mkv", ".mov", ".aiff", ".aif"}
 
@@ -72,9 +73,15 @@ def worker_lock(output):
 
 
 def write_json(path, value):
-    pending = path.with_suffix(path.suffix + ".tmp")
-    pending.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    pending.replace(path)
+    body = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
+    file = NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=".json-", delete=False)
+    pending = Path(file.name)
+    try:
+        with file:
+            file.write(body)
+        pending.replace(path)
+    finally:
+        pending.unlink(missing_ok=True)
 
 
 def export_index(db, output):

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from local_transcriber.dashboard import make_server
-from local_transcriber.queue import add_job, connect, export_index, update, worker_lock
+from local_transcriber.queue import add_job, connect, export_index, update, worker_lock, write_json
 from local_transcriber.sources import add_sources, fingerprint, youtube_url
 from local_transcriber.worker import render_transcript, run
 
@@ -62,6 +62,29 @@ class PipelineTests(unittest.TestCase):
         for value in ["https://youtube.com.evil.test/watch?v=abc", "file:///etc/passwd", "https://example.com/media"]:
             self.assertFalse(youtube_url(value))
         self.assertTrue(youtube_url("https://youtu.be/abcdefghijk"))
+
+    @patch("yt_dlp.YoutubeDL")
+    def test_youtube_playlist_deduplicates_ids_and_skips_live_broadcasts(self, youtube):
+        client = youtube.return_value.__enter__.return_value
+        client.extract_info.return_value = {"entries": [
+            {"id": "video000001", "title": "Synthetic replay", "upload_date": "20260115", "duration": 30},
+            {"id": "video000001", "title": "Duplicate replay"},
+            {"id": "video000002", "title": "Still live", "live_status": "is_live"},
+        ]}
+        inputs = ["https://www.youtube.com/playlist?list=synthetic"]
+        self.assertEqual(add_sources(self.db, inputs, CONFIG, self.output), 1)
+        row = self.db.execute("SELECT source, date FROM jobs").fetchone()
+        self.assertEqual(row["source"], "https://www.youtube.com/watch?v=video000001")
+        self.assertEqual(row["date"], "2026-01-15")
+
+    def test_parallel_index_updates_are_atomic(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        path = self.output / "index.json"
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            list(executor.map(lambda number: write_json(path, {"number": number}), range(20)))
+        self.assertIn(json.loads(path.read_text())["number"], range(20))
+        self.assertEqual(list(self.output.glob(".json-*")), [])
 
     def test_render_preserves_unicode_and_aligns_txt_and_srt(self):
         segments = [cue(text="A  synthetic\nlesson."), cue(.5, 2, "مرحبا", confidence=-1.2)]

@@ -25,6 +25,7 @@
 </main>
 <script>
 let jobs = [];
+let snapshot = '';
 const el = id => document.getElementById(id);
 function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -74,9 +75,14 @@ async function refresh() {
   try {
     const response = await fetch('/api/jobs', {cache: 'no-store'});
     if (!response.ok) throw new Error('Connection failed');
-    jobs = await response.json();
+    const updated = await response.json();
     el('connection').hidden = true;
-    render();
+    const nextSnapshot = JSON.stringify(updated);
+    if (snapshot !== nextSnapshot) {
+      jobs = updated;
+      snapshot = nextSnapshot;
+      render();
+    }
   } catch (error) { el('connection').hidden = false; }
   setTimeout(refresh, 2500);
 }
