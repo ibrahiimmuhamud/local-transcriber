@@ -15,6 +15,10 @@ The model runs locally. The first run downloads the selected model from Hugging 
 
 This project grew out of organizing a long-form English/Arabic lecture archive. This public version accepts your own inputs and has no channel-specific manifest or bundled recordings. It uses the general Whisper transcription/translation workflow. Specialized Quran matching and the archive’s individually reviewed corrections are outside this version.
 
+## Tamkeen Youth transcript archive
+
+Browse the [85 English halaqa transcripts](archives/tamkeen-halaqas/README.md), organized by year and month with dates, original titles, timestamps, and links to the recordings. These are machine-generated drafts with unresolved wording marked in the text.
+
 ## Install
 
 Use Python 3.10 or newer. macOS, Linux, and Windows can run the CPU version. An NVIDIA GPU can accelerate processing with a compatible CUDA/cuDNN installation. Apple Silicon uses the CPU backend in this release.
